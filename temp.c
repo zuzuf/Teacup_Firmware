@@ -14,6 +14,7 @@
 #include	"debug.h"
 #ifndef	EXTRUDER
 	#include	"sersendf.h"
+	#include	"eeconfig.h"
 #endif
 #include	"heater.h"
 #ifdef	TEMP_INTERCOM
@@ -315,8 +316,13 @@ uint8_t	temp_achieved() {
 	uint8_t all_ok = 255;
 
 	for (i = 0; i < NUM_TEMP_SENSORS; i++) {
-		if (temp_sensors_runtime[i].temp_residency < (TEMP_RESIDENCY_TIME*100))
+		#ifndef EXTRUDER
+		if (temp_sensors_runtime[i].temp_residency < eeconfig.temp_residency*100)
 			all_ok = 0;
+		#else
+		if (temp_sensors_runtime[i].temp_residency < TEMP_RESIDENCY_TIME*100)
+			all_ok = 0;
+		#endif
 	}
 	return all_ok;
 }
