@@ -282,17 +282,33 @@ void temp_sensor_tick() {
 			  (EWMA_SCALE-EWMA_ALPHA) * temp_sensors_runtime[i].last_read_temp
 			                                         ) / EWMA_SCALE);
 		}
-		if (labs((int16_t)(temp_sensors_runtime[i].last_read_temp - temp_sensors_runtime[i].target_temp)) < (TEMP_HYSTERESIS*4)) {
-			if (temp_sensors_runtime[i].temp_residency < (TEMP_RESIDENCY_TIME*120))
-				temp_sensors_runtime[i].temp_residency++;
-		}
-		else {
-			// Deal with flakey sensors which occasionally report a wrong value
-			// by setting residency back, but not entirely to zero.
-			if (temp_sensors_runtime[i].temp_residency > 10)
-				temp_sensors_runtime[i].temp_residency -= 10;
-			else
-				temp_sensors_runtime[i].temp_residency = 0;
+		#ifdef EECONFIG
+			if (labs((int16_t)(temp_sensors_runtime[i].last_read_temp - temp_sensors_runtime[i].target_temp)) < (eeconfig.temp_hysteresis * 4)) {
+				if (temp_sensors_runtime[i].temp_residency < eeconfig.temp_residency)
+					temp_sensors_runtime[i].temp_residency++;
+			}
+			else {
+				// Deal with flakey sensors which occasionally report a wrong value
+				// by setting residency back, but not entirely to zero.
+				if (temp_sensors_runtime[i].temp_residency > 10)
+					temp_sensors_runtime[i].temp_residency -= 10;
+				else
+					temp_sensors_runtime[i].temp_residency = 0;
+			}
+		#else
+			if (labs((int16_t)(temp_sensors_runtime[i].last_read_temp - temp_sensors_runtime[i].target_temp)) < (TEMP_HYSTERESIS*4)) {
+				if (temp_sensors_runtime[i].temp_residency < (TEMP_RESIDENCY_TIME*100))
+					temp_sensors_runtime[i].temp_residency++;
+			}
+			else {
+				// Deal with flakey sensors which occasionally report a wrong value
+				// by setting residency back, but not entirely to zero.
+				if (temp_sensors_runtime[i].temp_residency > 10)
+					temp_sensors_runtime[i].temp_residency -= 10;
+				else
+					temp_sensors_runtime[i].temp_residency = 0;
+			}
+		#endif
 		}
 
 		if (temp_sensors[i].heater < NUM_HEATERS) {

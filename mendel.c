@@ -184,8 +184,10 @@ void io_init(void) {
 
 /// Startup code, run when we come out of reset
 void init(void) {
+	#ifdef EECONFIG
 	// read config from eeprom
 	eeconfig_init();
+	#endif
 
 	// set up watchdog
 	wd_init();
