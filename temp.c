@@ -12,6 +12,9 @@
 
 #include	"arduino.h"
 #include	"debug.h"
+#ifdef SD
+  #include "sd.h"
+#endif
 #ifndef	EXTRUDER
 	#include	"sersendf.h"
 #endif
@@ -31,6 +34,7 @@
 #ifdef	TEMP_AD595
 #include	"analog.h"
 #endif
+
 
 typedef enum {
 	PRESENT,
@@ -327,6 +331,11 @@ uint8_t	temp_achieved() {
 void temp_set(temp_sensor_t index, uint16_t temperature) {
 	if (index >= NUM_TEMP_SENSORS)
 		return;
+
+  #ifdef SD
+    if (sdflags & SDFLAG_WRITING)
+      return;
+  #endif
 
 	// only reset residency if temp really changed
 	if (temp_sensors_runtime[index].target_temp != temperature) {
