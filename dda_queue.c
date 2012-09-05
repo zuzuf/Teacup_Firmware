@@ -140,9 +140,9 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 	// make certain all writes to global memory
 	// are flushed before modifying mb_head.
 	MEMORY_BARRIER();
-	
+
 	mb_head = h;
-	
+
 	uint8_t save_reg = SREG;
 	cli();
 	CLI_SEI_BUG_MEMORY_BARRIER();
