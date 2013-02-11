@@ -116,6 +116,14 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	y_delta_um = (uint32_t)labs(target->Y - startpoint.Y);
 	z_delta_um = (uint32_t)labs(target->Z - startpoint.Z);
 
+	#ifdef LOOKAHEAD
+	// Look ahead vectorization: determine the displacement vector (in um) for this move
+	dda->delta.X = target->X - startpoint.X;
+	dda->delta.Y = target->Y - startpoint.Y;
+	dda->delta.Z = target->Z - startpoint.Z;
+	dda->delta.E = target->e_relative ? target->E : target->E - startpoint.E;
+	#endif
+
 	steps = um_to_steps_x(target->X);
 	dda->x_delta = labs(steps - startpoint_steps.X);
 	startpoint_steps.X = steps;
@@ -155,12 +163,24 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 		sersendf_P(PSTR("%ld,%ld,%ld,%ld] ["), target->X - startpoint.X, target->Y - startpoint.Y, target->Z - startpoint.Z, target->E - startpoint.E);
 
 	dda->total_steps = dda->x_delta;
-	if (dda->y_delta > dda->total_steps)
+	if (dda->y_delta > dda->total_steps) {
 		dda->total_steps = dda->y_delta;
-	if (dda->z_delta > dda->total_steps)
+		#ifdef ACCELERATION_RAMPING
+		dda->lead = Y;
+		#endif
+	}
+	if (dda->z_delta > dda->total_steps) {
 		dda->total_steps = dda->z_delta;
-	if (dda->e_delta > dda->total_steps)
+		#ifdef ACCELERATION_RAMPING
+		dda->lead = Z;
+		#endif
+	}
+	if (dda->e_delta > dda->total_steps) {
 		dda->total_steps = dda->e_delta;
+		#ifdef ACCELERATION_RAMPING
+		dda->lead = E;
+		#endif
+	}
 
 	if (DEBUG_DDA && (debug_flags & DEBUG_DDA))
 		sersendf_P(PSTR("ts:%lu"), dda->total_steps);
@@ -305,7 +325,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 			dda->c_min = (move_duration / target->F) << 8;
 			if (dda->c_min < c_limit)
 				dda->c_min = c_limit;
-// This section is plain wrong, like in it's only half of what we need. This factor 960000 is dependant on STEPS_PER_MM.
+			// This section is plain wrong, like in it's only half of what we need. This factor 960000 is dependant on STEPS_PER_MM.
 			// overflows at target->F > 65535; factor 16. found by try-and-error; will overshoot target speed a bit
       //dda->rampup_steps = target->F * target->F / (uint32_t)(STEPS_PER_M_X * ACCELERATION / 960000.);
 //sersendf_P(PSTR("rampup calc %lu\n"), dda->rampup_steps);
@@ -469,6 +489,18 @@ void dda_step(DDA *dda) {
 			x_step();
 			move_state.x_steps--;
 			move_state.x_counter += dda->total_steps;
+
+#if (defined X_MIN_PIN || defined X_MAX_PIN) && defined ENDSTOP_ALWAYS_CHECK
+			// Check if we want to search for the end stops, if not and they are toggled do an emergency stop
+			if ((dda->endstop_check & 0x1) == 0) {
+#if defined X_MIN_PIN
+				if (x_min() == 1) dda_emergency_shutdown(PSTR("x-axis min end stop triggered"));
+#endif
+#if defined X_MAX_PIN
+				if (x_max() == 1) dda_emergency_shutdown(PSTR("x-axis max end stop triggered"));
+#endif
+			}
+#endif
 		}
 	}
 #else	// ACCELERATION_TEMPORAL
@@ -477,6 +509,18 @@ void dda_step(DDA *dda) {
 		move_state.x_steps--;
 		move_state.x_time += dda->x_step_interval;
 		move_state.all_time = move_state.x_time;
+
+#if (defined X_MIN_PIN || defined X_MAX_PIN) && defined ENDSTOP_ALWAYS_CHECK
+		// Check if we want to search for the end stops, if not and they are toggled do an emergency stop
+		if ((dda->endstop_check & 0x1) == 0) {
+#if defined X_MIN_PIN
+			if (x_min() == 1) dda_emergency_shutdown(PSTR("x-axis min end stop triggered"));
+#endif
+#if defined X_MAX_PIN
+			if (x_max() == 1) dda_emergency_shutdown(PSTR("x-axis max end stop triggered"));
+#endif
+		}
+#endif
 	}
 #endif
 
@@ -487,6 +531,18 @@ void dda_step(DDA *dda) {
 			y_step();
 			move_state.y_steps--;
 			move_state.y_counter += dda->total_steps;
+
+#if (defined Y_MIN_PIN || defined Y_MAX_PIN) && defined ENDSTOP_ALWAYS_CHECK
+			// Check if we want to search for the end stops, if not and they are toggled do an emergency stop
+			if ((dda->endstop_check & 0x2) == 0) {
+#if defined Y_MIN_PIN
+				if (y_min() == 1) dda_emergency_shutdown(PSTR("y-axis min end stop triggered"));
+#endif
+#if defined Y_MAX_PIN
+				if (y_max() == 1) dda_emergency_shutdown(PSTR("y-axis max end stop triggered"));
+#endif
+			}
+#endif
 		}
 	}
 #else	// ACCELERATION_TEMPORAL
@@ -495,6 +551,18 @@ void dda_step(DDA *dda) {
 		move_state.y_steps--;
 		move_state.y_time += dda->y_step_interval;
 		move_state.all_time = move_state.y_time;
+
+#if (defined Y_MIN_PIN || defined Y_MAX_PIN) && defined ENDSTOP_ALWAYS_CHECK
+		// Check if we want to search for the end stops, if not and they are toggled do an emergency stop
+		if ((dda->endstop_check & 0x2) == 0) {
+#if defined Y_MIN_PIN
+			if (y_min() == 1) dda_emergency_shutdown(PSTR("y-axis min end stop triggered"));
+#endif
+#if defined Y_MAX_PIN
+			if (y_max() == 1) dda_emergency_shutdown(PSTR("y-axis max end stop triggered"));
+#endif
+		}
+#endif
 	}
 #endif
 
@@ -505,6 +573,18 @@ void dda_step(DDA *dda) {
 			z_step();
 			move_state.z_steps--;
 			move_state.z_counter += dda->total_steps;
+
+#if (defined Z_MIN_PIN || defined Z_MAX_PIN) && defined ENDSTOP_ALWAYS_CHECK
+			// Check if we want to search for the end stops, if not and they are toggled do an emergency stop
+			if ((dda->endstop_check & 0x4) == 0) {
+#if defined Z_MIN_PIN
+				if (z_min() == 1) dda_emergency_shutdown(PSTR("z-axis min end stop triggered"));
+#endif
+#if defined Z_MAX_PIN
+				if (z_max() == 1) dda_emergency_shutdown(PSTR("z-axis max end stop triggered"));
+#endif
+			}
+#endif
 		}
 	}
 #else	// ACCELERATION_TEMPORAL
@@ -513,6 +593,18 @@ void dda_step(DDA *dda) {
 		move_state.z_steps--;
 		move_state.z_time += dda->z_step_interval;
 		move_state.all_time = move_state.z_time;
+
+#if (defined Z_MIN_PIN || defined Z_MAX_PIN) && defined ENDSTOP_ALWAYS_CHECK
+		// Check if we want to search for the end stops, if not and they are toggled do an emergency stop
+		if ((dda->endstop_check & 0x4) == 0) {
+#if defined Z_MIN_PIN
+			if (z_min() == 1) dda_emergency_shutdown(PSTR("z-axis min end stop triggered"));
+#endif
+#if defined Z_MAX_PIN
+			if (z_max() == 1) dda_emergency_shutdown(PSTR("z-axis max end stop triggered"));
+#endif
+		}
+#endif
 	}
 #endif
 
@@ -585,15 +677,17 @@ void dda_step(DDA *dda) {
 			if (move_state.n < 0) // wrong ramp direction
 				move_state.n = -((int32_t)2) - move_state.n;
 			recalc_speed = 1;
+			//serial_writestr((uint8_t*)"Up:  ");
 		}
 		else if (move_state.step_no >= dda->rampdown_steps) {
 			if (move_state.n > 0) // wrong ramp direction
 				move_state.n = -((int32_t)2) - move_state.n;
 			recalc_speed = 1;
+			//serial_writestr((uint8_t*)"Down:");
 		}
 		if (recalc_speed) {
 			move_state.n += 4;
-			// be careful of signedness!
+			// be careful of signedness! note: equation 13:
 			move_state.c = (int32_t)move_state.c - ((int32_t)(move_state.c * 2) / (int32_t)move_state.n);
       //sersendf_P(PSTR("n:%ld; c:%ld; steps: %ld / %lu\n"), move_state.n,
       //           move_state.c, move_state.step_no, move_state.y_steps);
