@@ -209,6 +209,12 @@ MXL 2.032 mm/tooth, 29
 #define LOOKAHEAD_MAX_JERK_E 10
 
 
+/** \def LOOKAHEAD_DEBUG
+ * When defined, some sanity tests are enabled to aid in debugging the lookahead
+ * functionality. Since these actually terminate the firmware if something goes wrong,
+ * do not enable this unless you are debugging!
+ */
+//#define LOOKAHEAD_DEBUG
 
 /***************************************************************************\
 *                                                                           *
