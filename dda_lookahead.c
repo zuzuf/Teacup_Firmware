@@ -132,6 +132,7 @@ int dda_jerk_size_2d(int32_t x1, int32_t y1, uint32_t F1, int32_t x2, int32_t y2
   return MAX(dda_jerk_size_1d(x1,F1,x2,F2),dda_jerk_size_1d(y1,F1,y2,F2));
 }
 
+#if defined LOOKAHEAD_DEBUG
 /**
  * Safety procedure: if something goes wrong, for example an opto is triggered during normal movement,
  * we shut down the entire machine.
@@ -150,6 +151,7 @@ void dda_emergency_shutdown(PGM_P msg) {
   cli();
   for (;;) { }
 }
+#endif // LOOKAHEAD_DEBUG
 
 /**
  * Join 2 moves by removing the full stop between them, where possible.

@@ -351,7 +351,7 @@ void process_gcode_command() {
 				//?
 				//? Example: M0
 				//?
-				//? http://linuxcnc.org/handbook/RS274NGC_3/RS274NGC_33a.html#1002379
+				//? http://linuxcnc.org/docs/html/gcode/m-code.html#sec:M0-M1
 				//? Unimplemented, especially the restart after the stop. Fall trough to M2.
 				//?
 
@@ -361,7 +361,7 @@ void process_gcode_command() {
 				//?
 				//? Example: M2
 				//?
-				//? http://linuxcnc.org/handbook/RS274NGC_3/RS274NGC_33a.html#1002379
+				//? http://linuxcnc.org/docs/html/gcode/m-code.html#sec:M2-M30
 				//?
 				queue_wait();
 				for (i = 0; i < NUM_HEATERS; i++)
