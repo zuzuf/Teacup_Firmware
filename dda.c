@@ -26,6 +26,10 @@
 	#include	"heater.h"
 #endif
 
+#if defined ACCELERATION_RAMPING && defined ACCELERATION_CLOCK
+  #error Cant define ACCELERATION_RAMPING and ACCELERATION_CLOCK at the same time.
+#endif
+
 /*
 	position tracking
 */
@@ -344,6 +348,33 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
       #ifdef LOOKAHEAD
         dda_join_moves(prev_dda, dda);
       #endif
+    #elif defined ACCELERATION_CLOCK
+      uint16_t candidate;
+
+      // 1 um/ms = 1 mm/s = 60 mm/min
+      dda->time_total = distance * (60 / TICK_TIME_MS) / target->F;
+      candidate = x_delta_um * (60 / TICK_TIME_MS) / MAXIMUM_FEEDRATE_X;
+      if (candidate > dda->time_total)
+        dda->time_total = candidate;
+      candidate = y_delta_um * (60 / TICK_TIME_MS) / MAXIMUM_FEEDRATE_Y;
+      if (candidate > dda->time_total)
+        dda->time_total = candidate;
+      candidate = z_delta_um * (60 / TICK_TIME_MS) / MAXIMUM_FEEDRATE_Z;
+      if (candidate > dda->time_total)
+        dda->time_total = candidate;
+      candidate = e_delta_um * (60 / TICK_TIME_MS) / MAXIMUM_FEEDRATE_E;
+      if (candidate > dda->time_total)
+        dda->time_total = candidate;
+#include	"delay.h"
+sersendf_P(PSTR("time total %u\n"), dda->time_total); delay_ms(10);
+
+      dda->F_start = 0;
+      dda->F_end = 0;
+      dda->F_max = distance * (60 / TICK_TIME_MS) / dda->time_total;
+sersendf_P(PSTR("corrected F_max %u\n"), dda->F_max); delay_ms(10);
+//      dda->time_accel = (target->F - dda->F_start) / ACCELERATION;
+//      dda->time_total = move_duration + accel_time / 2 + decel_time / 2;
+      dda->time_current = 0;
 		#elif defined ACCELERATION_TEMPORAL
 			// TODO: limit speed of individual axes to MAXIMUM_FEEDRATE
 			// TODO: calculate acceleration/deceleration for each axis
@@ -701,6 +732,12 @@ void dda_step(DDA *dda) {
 		setTimer(dda->c >> 8);
 	#endif
 
+  #ifdef ACCELERATION_CLOCK
+//  if (dda->time_current = dda->time_total)
+//    // Keep it short to have at least a chance to get it sent.
+//    sersendf_P(PSTR("%us"), move_state.step_no - dda->total_steps);
+  #endif
+
 	// turn off step outputs, hopefully they've been on long enough by now to register with the drivers
 	// if not, too bad. or insert a (very!) small delay here, or fire up a spare timer or something.
 	// we also hope that we don't step before the drivers register the low- limit maximum speed if you think this is a problem.
@@ -820,6 +857,26 @@ void dda_clock() {
   } /* if (endstop_stop == 0) */
 
   last_dda = dda;
+
+  #ifdef ACCELERATION_CLOCK
+  // TODO: wrap that with interrupt protection
+  dda->time_current++;
+  if (dda->time_current > dda->time_total) {
+    // Keep it short to have at least a chance to get it sent.
+    serial_writestr_P(PSTR("ot"));
+    dda->time_current = dda->time_total;
+  }
+  if (dda->time_current < dda->time_accel) {
+    // v = a * t; c = 1 / v;
+    dda->c = F_CPU / ACCELERATION * dda->time_current;
+  }
+  else {
+    uint16_t f = (dda->time_total - dda->time_current) * ACCELERATION;
+    if (f > dda->F_max)
+      f = dda->F_max;
+    dda->c = F_CPU / f;
+  }
+  #endif
 }
 
 /// update global current_position struct

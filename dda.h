@@ -160,6 +160,14 @@ typedef struct {
   uint8_t           id;
   #endif
 	#endif
+  #ifdef ACCELERATION_CLOCK
+  uint16_t          F_start;
+  uint16_t          F_end;
+  uint16_t          F_max;
+  uint16_t          time_accel; ///< in clock ticks (1ms or 2ms)
+  uint16_t          time_total; ///< in clock ticks (1ms or 2ms)
+  uint16_t          time_current;
+  #endif
 	#ifdef ACCELERATION_TEMPORAL
 	uint32_t					x_step_interval; ///< time between steps on X axis
 	uint32_t					y_step_interval; ///< time between steps on Y axis
