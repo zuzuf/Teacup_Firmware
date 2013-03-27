@@ -47,15 +47,17 @@ uint8_t queue_full() {
 
 /// check if the queue is completely empty
 uint8_t queue_empty() {
+#if defined (__AVR__)
 	uint8_t save_reg = SREG;
 	cli();
 	CLI_SEI_BUG_MEMORY_BARRIER();
-	
+#endif	
 	uint8_t result = ((mb_tail == mb_head) && (movebuffer[mb_tail].live == 0))?255:0;
-
+#if defined (__AVR__)
 	MEMORY_BARRIER();
 	SREG = save_reg;
-
+#endif
+	sei();
 	return result;
 }
 
@@ -135,21 +137,22 @@ void enqueue_home(TARGET *t, uint8_t endstop_check, uint8_t endstop_stop_cond) {
 	MEMORY_BARRIER();
 	
 	mb_head = h;
-	
+#if defined (__AVR__)	
 	uint8_t save_reg = SREG;
 	cli();
 	CLI_SEI_BUG_MEMORY_BARRIER();
-
+#endif
 	uint8_t isdead = (movebuffer[mb_tail].live == 0);
-	
+#if defined (__AVR__)	
 	MEMORY_BARRIER();
 	SREG = save_reg;
-	
+#endif
 	if (isdead) {
 		next_move();
 		// Compensate for the cli() in setTimer().
 		sei();
 	}
+	sei();
 }
 
 /// go to the next move.
@@ -193,19 +196,22 @@ void queue_flush() {
 	// Since the timer interrupt is disabled before this function
 	// is called it is not strictly necessary to write the variables
 	// inside an interrupt disabled block...
+#if defined (__AVR__)
 	uint8_t save_reg = SREG;
 	cli();
 	CLI_SEI_BUG_MEMORY_BARRIER();
-	
+#endif		
 	// flush queue
 	mb_tail = mb_head;
 	movebuffer[mb_head].live = 0;
 
 	// disable timer
 	setTimer(0);
-	
+#if defined (__AVR__)	
 	MEMORY_BARRIER();
 	SREG = save_reg;
+#endif
+	sei();
 }
 
 /// wait for queue to empty

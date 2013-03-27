@@ -25,7 +25,7 @@
 #error REFERENCE undefined
 #endif
 
-void 			analog_init(void);
+void 			analog_initialize(void);
 
 uint16_t	analog_read(uint8_t index);
 

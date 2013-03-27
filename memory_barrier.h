@@ -2,7 +2,9 @@
 #define _MEMORY_BARRIER_H_
 
 #include <util/atomic.h>
-#include <avr/version.h>
+#ifdef __AVR__
+#include <avr/io.h>
+#endif
 
 // Provide a memory barrier to the compiler. This informs
 // the compiler that is should write any cached values that

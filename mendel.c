@@ -24,8 +24,12 @@
 			ctrl+d \endcode
 */
 
+#if defined (__AVR__)
+#else
 #include	<avr/io.h>
 #include	<avr/interrupt.h>
+#include "WProgram.h"
+#endif
 
 #include	"config.h"
 #include	"fuses.h"
@@ -46,9 +50,11 @@
 #include	"arduino.h"
 #include	"clock.h"
 #include	"intercom.h"
+#include        "usb_dev.h"
 
 /// initialise all I/O - set pins as input or output, turn off unused subsystems, etc
 void io_init(void) {
+#if defined (__AVR__)
 	// disable modules we don't use
 	#ifdef PRR
 		PRR = MASK(PRTWI) | MASK(PRADC) | MASK(PRSPI);
@@ -63,8 +69,9 @@ void io_init(void) {
 			PRR1 |= MASK(PRUSART2);
 		#endif
 	#endif
-	ACSR = MASK(ACD);
-
+	ACSR = MASK(ACD);  // enable analog comparator
+#else
+#endif
 	// setup I/O pins
 
 	// X Stepper
@@ -179,34 +186,87 @@ void io_init(void) {
 		WRITE(RX_ENABLE_PIN,0);
 		disable_transmit();
 	#endif
+	#ifdef DEBUG_LED
+		SET_OUTPUT(DEBUG_LED);
+		WRITE(DEBUG_LED,0);
+	#endif
+}
+
+
+void blinkNM(int n, int m ){ // debugging routine to test for life
+#define DEBUG_LED2 DIO13
+  #if defined DEBUG_LED2
+  SET_OUTPUT(DEBUG_LED2);
+  static int ms = 200;
+  static int sec = 1000;
+  int count;
+  while(m--){
+    count = n;
+    while(count--){
+      WRITE(DEBUG_LED2,1);
+      //      digitalWrite(LED_BUILTIN,HIGH);
+      delay(ms);
+      WRITE(DEBUG_LED2,0);
+      //WRITE(DEBUG_LED,0);
+      delay(ms);
+    }
+    delay(sec);
+  }
+  #endif
 }
 
 /// Startup code, run when we come out of reset
 void init(void) {
+  
 	// set up watchdog
 	wd_init();
+	blinkNM(1,1);
+	blinkNM(2,1);
+
 
 	// set up serial
-	serial_init();
 
+	#ifdef USB_SERIAL
+	//	usb_init(); not needed.
+	#else 
+	serial_init();
+	#endif
+	blinkNM(3,1);
+
+	//          usb_serial_write("hello world!\n",13);
+	  	  serial_writestr_P(PSTR(";;Serial Subsystem configured\nok\n"));
+
+	  blinkNM(4,1);
+
+
+	blinkNM(5,1);
 	// set up G-code parsing
 	gcode_init();
+	  	  serial_writestr_P(PSTR(";;gcode Subsystem configured\nok\n"));
+	blinkNM(6,1);
 
 	// set up inputs and outputs
 	io_init();
+	  	  serial_writestr_P(PSTR(";;io Subsystem configured\nok\n"));
 
 	// set up timers
 	timer_init();
+	  	  serial_writestr_P(PSTR(";;timer Subsystem configured\nok\n"));
+
 
 	// read PID settings from EEPROM
+
 	heater_init();
+	  	  serial_writestr_P(PSTR(";;heater Subsystem configured\nok\n"));
 
 	// set up dda
 	dda_init();
+	  	  serial_writestr_P(PSTR(";;dda Subsystem configured\nok\n"));
 
 	// start up analog read interrupt loop,
 	// if any of the temp sensors in your config.h use analog interface
-	analog_init();
+	analog_initialize();
+	  	  serial_writestr_P(PSTR(";;analog Subsystem configured\nok\n"));
 
 	// set up temperature inputs
 	temp_init();
@@ -214,24 +274,30 @@ void init(void) {
 	// enable interrupts
 	sei();
 
+
 	// reset watchdog
 	wd_reset();
 
 	// say hi to host
+        
 	serial_writestr_P(PSTR("start\nok\n"));
+
 
 }
 
 /// this is where it all starts, and ends
 ///
 /// just run init(), then run an endless loop where we pass characters from the serial RX buffer to gcode_parse_char() and check the clocks
+
 int main (void)
 {
 	init();
 
+
 	// main loop
 	for (;;)
 	{
+	  //	serial_writestr_P(PSTR("."));
 		// if queue is full, no point in reading chars- host will just have to wait
 		if ((serial_rxchars() != 0) && (queue_full() == 0)) {
 			uint8_t c = serial_popchar();
@@ -239,5 +305,8 @@ int main (void)
 		}
 
 		clock();
+
+
+
 	}
 }

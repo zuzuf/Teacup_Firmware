@@ -113,18 +113,18 @@ void sersendf_P(PGM_P format, ...) {
 					if (j == 4)
 						serwrite_uint32(va_arg(args, uint32_t));
 					else
-						serwrite_uint16(va_arg(args, uint16_t));
+					  serwrite_uint16((uint16_t)va_arg(args, int));
 					j = 0;
 					break;
 				case 'd':
 					if (j == 4)
 						serwrite_int32(va_arg(args, int32_t));
 					else
-						serwrite_int16(va_arg(args, int16_t));
+					  serwrite_int16((uint16_t)va_arg(args, int));
 					j = 0;
 					break;
 				case 'c':
-					serial_writechar(va_arg(args, uint16_t));
+				  serial_writechar((uint8_t)va_arg(args, int));
 					j = 0;
 					break;
 				case 'x':
@@ -132,9 +132,9 @@ void sersendf_P(PGM_P format, ...) {
 					if (j == 4)
 						serwrite_hex32(va_arg(args, uint32_t));
 					else if (j == 1)
-						serwrite_hex8(va_arg(args, uint16_t));
+					  serwrite_hex8((uint8_t)va_arg(args, int));
 					else
-						serwrite_hex16(va_arg(args, uint16_t));
+					  serwrite_hex16((uint16_t)va_arg(args, int));
 					j = 0;
 					break;
 /*				case 'p':
