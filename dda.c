@@ -766,6 +766,7 @@ void dda_step(DDA *dda) {
 	#else
     #ifdef ACCELERATION_CLOCK
     move_state.ticks_since_step = 0;
+  serial_writechar('s');
     #endif
 		setTimer(dda->c >> 8);
 	#endif
@@ -806,7 +807,6 @@ void dda_clock() {
     move_state.debounce_count_ymax = move_state.debounce_count_zmax = 0;
     endstop_stop = 0;
   }
-sersendf_P(PSTR("c 16ms %lu\n"), dda->c); delay_ms(10);
 
   if (dda == NULL)
     return;
@@ -898,6 +898,9 @@ sersendf_P(PSTR("c 16ms %lu\n"), dda->c); delay_ms(10);
   last_dda = dda;
 
   #ifdef ACCELERATION_CLOCK
+  uint32_t new_c = 0;
+  static uint8_t plateau_done = 0;
+
   // TODO: wrap that with interrupt protection
   move_state.time_current += TICK_TIME_MS;
 
@@ -911,35 +914,53 @@ sersendf_P(PSTR("c 16ms %lu\n"), dda->c); delay_ms(10);
   // Acceleration time.
   else if (move_state.time_current < dda->time_accel) {
     // v = a * t; c = 1 / v;
-    dda->c = dda->f_to_c / ((uint32_t)ACCELERATION * 60UL * (uint32_t)move_state.time_current * TICK_TIME_MS / 1000UL);
+    new_c = dda->f_to_c / ((uint32_t)ACCELERATION * 60UL * (uint32_t)move_state.time_current * TICK_TIME_MS / 1000UL);
+    plateau_done = 0;
+serial_writechar('a');
   }
   // Plateau time.
-  else {
+  else if (plateau_done == 0) {
     uint16_t f = (dda->time_total - move_state.time_current) * ACCELERATION; //??
     if (f > dda->F_max)
       f = dda->F_max;
-    dda->c = dda->f_to_c / dda->F_max; //ok
+    new_c = dda->f_to_c / dda->F_max; //ok
+    plateau_done = 1;
+serial_writechar('r');
   }
   // TODO: Deceleration time.
 
-  // Sharpen or readjust the timer if actual steps happen too slowly. dda_step()
+  if (new_c) {
+    uint8_t save_reg = SREG;
+    cli();
+    CLI_SEI_BUG_MEMORY_BARRIER();
+
+    dda->c = new_c;    
+
+    MEMORY_BARRIER();
+    SREG = save_reg;
+  }
+
+  // Set up or readjust the timer if actual steps happen too slowly. dda_step()
   // resets ticks_since_step to zero, while we increment it here, so we have an
   // idea on how much time is gone since the last actual step.
   // 300 = minimum time setTimer requires.
+  serial_writechar('.');
   if (move_state.ticks_since_step) {
-    if ((dda->c >> 8) < ((uint32_t)move_state.ticks_since_step * TICK_TIME) + 300UL)
+sersendf_P(PSTR("c %lu < %lu\n"), dda->c >> 8, ((uint32_t)move_state.ticks_since_step * TICK_TIME) + 300UL);
+
+    if ((dda->c >> 8) < ((uint32_t)move_state.ticks_since_step * TICK_TIME) + 300UL) {
       // We're too late already, go as quick as possbile.
       setTimer(300UL);
-    else
+  serial_writechar('-');
+    }
+    else {
       // TODO: we ignore the time taken until we get here.
-      setTimer((dda->c >> 8) - (move_state.ticks_since_step * TICK_TIME));
-    sei(); // setTimer locks interrupts
-serial_writechar('.');
+    sersendf_P(PSTR("+ %lu   "), (dda->c >> 8) - ((uint32_t)move_state.ticks_since_step * TICK_TIME));
+      setTimer((dda->c >> 8) - ((uint32_t)move_state.ticks_since_step * TICK_TIME));
+    }
   }
+  sei(); // setTimer locks interrupts
   move_state.ticks_since_step++;
-sersendf_P(PSTR("c\n"));
-
-//    sersendf_P(PSTR("c %lu   "), dda->c);
   #endif
 }
 
