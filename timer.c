@@ -48,6 +48,8 @@ ISR(TIMER1_COMPB_vect) {
 	// set output compare register to the next clock tick
 	OCR1B = (OCR1B + TICK_TIME) & 0xFFFF;
 
+//	sei();
+
 	/*
 	clock stuff
 	*/

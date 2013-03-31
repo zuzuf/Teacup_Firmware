@@ -25,6 +25,7 @@
 #ifdef	DC_EXTRUDER
 	#include	"heater.h"
 #endif
+#include	"delay.h"
 
 #if defined ACCELERATION_RAMPING && defined ACCELERATION_CLOCK
   #error Cant define ACCELERATION_RAMPING and ACCELERATION_CLOCK at the same time.
@@ -351,8 +352,11 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
     #elif defined ACCELERATION_CLOCK
       uint16_t candidate;
 
+      // Total time of the unaccelerated move.
       // 1 um/ms = 1 mm/s = 60 mm/min
       dda->time_total = distance * (60 / TICK_TIME_MS) / target->F;
+
+      // Movement time takes at least as much as the slowest axis requires.
       candidate = x_delta_um * (60 / TICK_TIME_MS) / MAXIMUM_FEEDRATE_X;
       if (candidate > dda->time_total)
         dda->time_total = candidate;
@@ -365,16 +369,44 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
       candidate = e_delta_um * (60 / TICK_TIME_MS) / MAXIMUM_FEEDRATE_E;
       if (candidate > dda->time_total)
         dda->time_total = candidate;
-#include	"delay.h"
 sersendf_P(PSTR("time total %u\n"), dda->time_total); delay_ms(10);
 
+      // Re-calculate speeds, as they might have changed.
       dda->F_start = 0;
       dda->F_end = 0;
       dda->F_max = distance * (60 / TICK_TIME_MS) / dda->time_total;
 sersendf_P(PSTR("corrected F_max %u\n"), dda->F_max); delay_ms(10);
-//      dda->time_accel = (target->F - dda->F_start) / ACCELERATION;
-//      dda->time_total = move_duration + accel_time / 2 + decel_time / 2;
-      dda->time_current = 0;
+      dda->time_accel = ((uint32_t)(target->F - dda->F_start)) *
+                        ((uint32_t)(1000 / TICK_TIME_MS)) /
+                        ((uint32_t)(60 * ACCELERATION));
+
+      // Add time required for acceleration / deceleration.
+      // time_total = move_duration + time_accel / 2 + time_decel / 2;
+sersendf_P(PSTR("time accel %u\n"), dda->time_accel); delay_ms(10);
+      dda->time_total += dda->time_accel; // for now, time_accel = time_decel
+sersendf_P(PSTR("time total w. accel %u\n"), dda->time_total); delay_ms(10);
+
+      // This is the ratio between F (in mm/min) and c (in CPU clock ticks)
+      // and is constant during the entire move, even on curved movements.
+      // Essentially, it's the step rate of the fastest stepping stepper
+      // of the entire move.
+      // For linear movements it's simple:
+      dda->f_to_c = (distance * 2400L) / dda->total_steps * (F_CPU / 40000) << 8;
+      // For curved movements, both, start and end vector have to be taken
+      // into account.
+
+      // Initial step delays. As we can't start with zero speed, advance
+      // all calculations by half a clock tick.
+      // v = a * t; c = 1 / v;
+// F_start nicht vergessen!
+      dda->c = dda->f_to_c / ((uint32_t)ACCELERATION * 60UL * TICK_TIME_MS / 1000UL);
+      
+sersendf_P(PSTR("c 16ms %lu\n"), dda->c); delay_ms(10);
+sersendf_P(PSTR("c 16ms %lu\n"), dda->f_to_c * 1000 / ((uint32_t)ACCELERATION * 60UL * (uint32_t)dda->time_accel * (uint32_t)TICK_TIME_MS)); delay_ms(10);
+sersendf_P(PSTR("c 16ms %lu\n"), dda->f_to_c / ((uint32_t)ACCELERATION * 60UL * (uint32_t)dda->time_accel / 1000UL * TICK_TIME_MS)); delay_ms(10);
+sersendf_P(PSTR("c_min new %lu\n"), dda->f_to_c / target->F); delay_ms(10);
+sersendf_P(PSTR("c_min trad %lu\n"), (move_duration / target->F) << 8); delay_ms(10);
+
 		#elif defined ACCELERATION_TEMPORAL
 			// TODO: limit speed of individual axes to MAXIMUM_FEEDRATE
 			// TODO: calculate acceleration/deceleration for each axis
@@ -473,6 +505,10 @@ void dda_start(DDA *dda) {
 		else
 			setTimer(move_state.c >> 8);
 		#else
+      #ifdef ACCELERATION_CLOCK
+      move_state.time_current = 0;
+      move_state.ticks_since_step = 0;
+      #endif
 		setTimer(dda->c >> 8);
 		#endif
 	}
@@ -610,7 +646,6 @@ void dda_step(DDA *dda) {
 		//if (move_state.step_no == 0) {
 		//	sersendf_P(PSTR("\r\nc %lu  c_min %lu  n %d"), dda->c, dda->c_min, move_state.n);
 		//}
-
 		recalc_speed = 0;
 		if (move_state.step_no < dda->rampup_steps) {
 			if (move_state.n < 0) // wrong ramp direction
@@ -729,6 +764,9 @@ void dda_step(DDA *dda) {
 		else
 			setTimer(move_state.c >> 8);
 	#else
+    #ifdef ACCELERATION_CLOCK
+    move_state.ticks_since_step = 0;
+    #endif
 		setTimer(dda->c >> 8);
 	#endif
 
@@ -768,6 +806,7 @@ void dda_clock() {
     move_state.debounce_count_ymax = move_state.debounce_count_zmax = 0;
     endstop_stop = 0;
   }
+sersendf_P(PSTR("c 16ms %lu\n"), dda->c); delay_ms(10);
 
   if (dda == NULL)
     return;
@@ -860,22 +899,47 @@ void dda_clock() {
 
   #ifdef ACCELERATION_CLOCK
   // TODO: wrap that with interrupt protection
-  dda->time_current++;
-  if (dda->time_current > dda->time_total) {
+  move_state.time_current += TICK_TIME_MS;
+
+  // Overtime?
+  if (move_state.time_current > dda->time_total) {
     // Keep it short to have at least a chance to get it sent.
-    serial_writestr_P(PSTR("ot"));
-    dda->time_current = dda->time_total;
+    #warning Das hier hört nicht auf.
+    //serial_writestr_P(PSTR("ot"));
+    move_state.time_current = dda->time_total;
   }
-  if (dda->time_current < dda->time_accel) {
+  // Acceleration time.
+  else if (move_state.time_current < dda->time_accel) {
     // v = a * t; c = 1 / v;
-    dda->c = F_CPU / ACCELERATION * dda->time_current;
+    dda->c = dda->f_to_c / ((uint32_t)ACCELERATION * 60UL * (uint32_t)move_state.time_current * TICK_TIME_MS / 1000UL);
   }
+  // Plateau time.
   else {
-    uint16_t f = (dda->time_total - dda->time_current) * ACCELERATION;
+    uint16_t f = (dda->time_total - move_state.time_current) * ACCELERATION; //??
     if (f > dda->F_max)
       f = dda->F_max;
-    dda->c = F_CPU / f;
+    dda->c = dda->f_to_c / dda->F_max; //ok
   }
+  // TODO: Deceleration time.
+
+  // Sharpen or readjust the timer if actual steps happen too slowly. dda_step()
+  // resets ticks_since_step to zero, while we increment it here, so we have an
+  // idea on how much time is gone since the last actual step.
+  // 300 = minimum time setTimer requires.
+  if (move_state.ticks_since_step) {
+    if ((dda->c >> 8) < ((uint32_t)move_state.ticks_since_step * TICK_TIME) + 300UL)
+      // We're too late already, go as quick as possbile.
+      setTimer(300UL);
+    else
+      // TODO: we ignore the time taken until we get here.
+      setTimer((dda->c >> 8) - (move_state.ticks_since_step * TICK_TIME));
+    sei(); // setTimer locks interrupts
+serial_writechar('.');
+  }
+  move_state.ticks_since_step++;
+sersendf_P(PSTR("c\n"));
+
+//    sersendf_P(PSTR("c %lu   "), dda->c);
   #endif
 }
 

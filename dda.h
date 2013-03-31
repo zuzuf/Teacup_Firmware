@@ -77,6 +77,10 @@ typedef struct {
 	/// tracking variable
 	int32_t						n;
 	#endif
+  #ifdef ACCELERATION_CLOCK
+  uint16_t          time_current;
+  uint8_t           ticks_since_step;
+  #endif
 	#ifdef ACCELERATION_TEMPORAL
 	uint32_t					x_time; ///< time of the last x step
 	uint32_t					y_time; ///< time of the last y step
@@ -166,7 +170,7 @@ typedef struct {
   uint16_t          F_max;
   uint16_t          time_accel; ///< in clock ticks (1ms or 2ms)
   uint16_t          time_total; ///< in clock ticks (1ms or 2ms)
-  uint16_t          time_current;
+  uint32_t          f_to_c;
   #endif
 	#ifdef ACCELERATION_TEMPORAL
 	uint32_t					x_step_interval; ///< time between steps on X axis
