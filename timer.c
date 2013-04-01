@@ -42,6 +42,16 @@ volatile uint8_t	clock_flag_1s = 0;
 
 /// comparator B is the system clock, happens every TICK_TIME
 ISR(TIMER1_COMPB_vect) {
+  static uint8_t busy = 0;
+
+  // As all the stuff done here is neither time critical nor
+  // the number of executions matters, don't re-enter.
+  // Experience shows, this is more a protection against sudden
+  // reboots than a way to substantially raising the maximum step rate.
+  if (busy)
+    return;
+  busy = 1;
+
 	// save status register
 	uint8_t sreg_save = SREG;
 
@@ -76,6 +86,8 @@ ISR(TIMER1_COMPB_vect) {
 	// restore status register
 	MEMORY_BARRIER();
 	SREG = sreg_save;
+
+  busy = 0;
 }
 
 #ifdef	MOTHERBOARD
