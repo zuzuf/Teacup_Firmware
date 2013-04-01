@@ -115,7 +115,7 @@ ISR(TICKER_ISR){ // Periodic Interrupt Timer 0
 
 }
 
-#endif
+#endif // AVR|ARM
 
 
 
@@ -351,5 +351,3 @@ void timer_stop() {
 	TICKER_DISABLE();
 }
 #endif /* ifdef MOTHERBOARD */
-
-

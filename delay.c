@@ -5,7 +5,9 @@
 */
 
 #include	<stdint.h>
+#if defined(__AVR__)
 #include	<util/delay_basic.h>
+#endif
 #include	"watchdog.h"
 
 #if F_CPU < 4000000UL
