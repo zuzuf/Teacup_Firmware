@@ -810,15 +810,17 @@ void dda_clock() {
       #ifdef ACCELERATION_RAMPING
       // For always smooth operations, don't halt apruptly,
       // but start deceleration here.
+#ifdef __AVR__
       uint8_t save_reg = SREG;
       cli();
       CLI_SEI_BUG_MEMORY_BARRIER();
-
+#endif
       dda->rampdown_steps = move_state.step_no;    
       dda->rampup_steps = 0; // in case we're still accelerating
-
+#ifdef __AVR__
       MEMORY_BARRIER();
-      SREG = save_reg;
+      //     SREG = save_reg;
+#endif
       #else
       dda->live = 0;
       #endif

@@ -63,18 +63,24 @@ uint8_t queue_empty() {
 
 /// Return the current movement, or NULL, if there's no movement going on.
 DDA *queue_current_movement() {
+#ifdef __AVR__
   uint8_t save_reg = SREG;
   cli();
   CLI_SEI_BUG_MEMORY_BARRIER();
+#else
+  cli();
+#endif
 
   DDA* current = &movebuffer[mb_tail];
 
   if ( ! current->live || current->waitfor_temp || current->nullmove)
     current = NULL;
-
+#ifdef __AVR__
   MEMORY_BARRIER();
   SREG = save_reg;
-
+#else
+  sei();
+#endif
   return current;
 }
 
