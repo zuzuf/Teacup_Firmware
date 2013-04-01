@@ -169,6 +169,7 @@ typedef struct {
   uint16_t          F_end;
   uint16_t          F_max;
   uint16_t          time_accel; ///< in clock ticks (1ms or 2ms)
+  uint16_t          time_decel; ///< in clock ticks (1ms or 2ms)
   uint16_t          time_total; ///< in clock ticks (1ms or 2ms)
   uint32_t          f_to_c;
   #endif
