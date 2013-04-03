@@ -229,20 +229,20 @@ void timer_init()
 	// Use two timers on the mk20dx128, FTM1 for steps, and PIT for periodic
 	//PIT0:  32 bit timer, clocked at F_BUS, or up to 2^32/F_BUS secs
         //FTM1:  16bit timer, F_CPU/2^(0..7)
-	serial_writestr_P(PSTR(";; ticker init starting\n"));
+	//serial_writestr_P(PSTR(";; ticker init starting\n"));
         delay(500);
 	//	TICKER_INIT(); 
 
-	serial_writestr_P(PSTR(";; ticker enable starting\n"));
+	//serial_writestr_P(PSTR(";; ticker enable starting\n"));
 	SIM_SCGC6 |= SIM_SCGC6_PIT;PIT_MCR = 0x00;				
 	//	PIT_LDVAL0 = F_BUS * ( TICK_TIME_MS/1000);
 	PIT_LDVAL0 = F_BUS * 2./1000;
         PIT_TCTRL0 = TIE|TEN; NVIC_ENABLE_IRQ(IRQ_PIT_CH0);
 	//TICKER_ENABLE();
-	serial_writestr_P(PSTR(";; ticker init completed\n"));
+	//serial_writestr_P(PSTR(";; ticker init completed\n"));
 
         TIMER_INIT();TIMER_ENABLE();
-	serial_writestr_P(PSTR(";; timer init completed\n"));
+	//serial_writestr_P(PSTR(";; timer init completed\n"));
 
 	//        sersendf_P(PSTR(";; timer init: FTM1 INIT: %lu / %u\n"),next_step_time, FTM1_MOD);
 
