@@ -8,7 +8,11 @@
 #ifndef	_ARDUINO_H
 #define	_ARDUINO_H
 
+#if defined(__AVR__)
 #include	<avr/io.h>
+#else 
+#include "avr_emulation.h"
+#endif
 
 /*
 	utility functions
