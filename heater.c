@@ -252,6 +252,7 @@ void heater_init() {
 #else // non __AVR__
                         analogWriteRes(8);  // scales analogWrite() per FTMx_MOD value
 			//       analogWriteFrequency(heaters[i].heater_pin,256); // adjusts  
+			
 #endif
 		} // end if
 
@@ -286,7 +287,7 @@ void heater_init() {
 	// set all heater pins to output
 	do {
 		#undef	DEFINE_HEATER
-		#define	DEFINE_HEATER(name, pin, pwm) WRITE(pin, 0); SET_OUTPUT(pin);
+#define	DEFINE_HEATER(name, pin, pwm) WRITE(pin, 0); SET_OUTPUT(pin); (pin ## _CONFIG) = PORT_PCR_MUX(4) | PORT_PCR_DSE | PORT_PCR_SRE;
 			#include "config.h"
 		#undef DEFINE_HEATER
 	} while (0);
