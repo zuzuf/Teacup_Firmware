@@ -220,8 +220,6 @@ void init(void) {
   
 	// set up watchdog
 	wd_init();
-	blinkNM(1,1);
-	blinkNM(2,1);
 
 
 	// set up serial
@@ -231,42 +229,28 @@ void init(void) {
 	#else 
 	serial_init();
 	#endif
-	blinkNM(3,1);
-
-	//          usb_serial_write("hello world!\n",13);
-	  	  serial_writestr_P(PSTR(";;Serial Subsystem configured\nok\n"));
-
-	  blinkNM(4,1);
-
-
-	blinkNM(5,1);
 	// set up G-code parsing
 	gcode_init();
-	  	  serial_writestr_P(PSTR(";;gcode Subsystem configured\nok\n"));
-	blinkNM(6,1);
 
 	// set up inputs and outputs
 	io_init();
-	  	  serial_writestr_P(PSTR(";;io Subsystem configured\nok\n"));
 
 	// set up timers
 	timer_init();
-	  	  serial_writestr_P(PSTR(";;timer Subsystem configured\nok\n"));
 
 
 	// read PID settings from EEPROM
 
 	heater_init();
-	  	  serial_writestr_P(PSTR(";;heater Subsystem configured\nok\n"));
 
 	// set up dda
 	dda_init();
-	  	  serial_writestr_P(PSTR(";;dda Subsystem configured\nok\n"));
 
 	// start up analog read interrupt loop,
 	// if any of the temp sensors in your config.h use analog interface
+
+
 	analog_initialize();
-	  	  serial_writestr_P(PSTR(";;analog Subsystem configured\nok\n"));
 
 	// set up temperature inputs
 	temp_init();
