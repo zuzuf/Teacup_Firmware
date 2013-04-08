@@ -286,8 +286,9 @@ void heater_init() {
 
 	// set all heater pins to output
 	do {
+	  // 
 		#undef	DEFINE_HEATER
-#define	DEFINE_HEATER(name, pin, pwm) WRITE(pin, 0); SET_OUTPUT(pin); (pin ## _CONFIG) = PORT_PCR_MUX(4) | PORT_PCR_DSE | PORT_PCR_SRE;
+#define	DEFINE_HEATER(name, pin, pwm) WRITE(pin, 0); SET_OUTPUT(pin); if(pin ## _PWM)  (pin ## _CONFIG) = PORT_PCR_MUX(4) | PORT_PCR_DSE | PORT_PCR_SRE;
 			#include "config.h"
 		#undef DEFINE_HEATER
 	} while (0);
@@ -436,7 +437,7 @@ void heater_set(heater_t index, uint8_t value) {
 	heaters_runtime[index].heater_output = value;
 
 	if (heaters[index].heater_pwm) {
-		*(heaters[index].heater_pwm) = value;
+	  *(heaters[index].heater_pwm) = ((uint32_t)value*(uint32_t)(FTM0_MOD+1))>>8;
 		#ifdef	DEBUG
 		if (DEBUG_PID && (debug_flags & DEBUG_PID))
 			sersendf_P(PSTR("PWM{%u = %lu}\n"), index, *heaters[index].heater_pwm);
