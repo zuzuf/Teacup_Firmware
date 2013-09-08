@@ -66,4 +66,9 @@ const uint8_t msbloc (uint32_t v);
 // Note: the floating point bit is optimized away during compilation
 #define ACCELERATE_RAMP_LEN(speed) (((speed)*(speed)) / (uint32_t)((7200000.0f * ACCELERATION) / (float)STEPS_PER_M_X))
 
+// Initialization constant for the ramping algorithm
+#ifdef ACCELERATION_RAMPING
+#define C0 (((uint32_t)((double)F_CPU / sqrt((double)(STEPS_PER_M_X * ACCELERATION / 1000.)))) << 8)
+#endif
+
 #endif	/* _DDA_MATHS_H */

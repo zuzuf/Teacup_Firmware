@@ -88,6 +88,7 @@ typedef struct {
 	/// Endstop debouncing
 	uint8_t debounce_count_xmin, debounce_count_ymin, debounce_count_zmin;
 	uint8_t debounce_count_xmax, debounce_count_ymax, debounce_count_zmax;
+
 } MOVE_STATE;
 
 /**
@@ -101,11 +102,11 @@ typedef struct {
 	/// this is where we should finish
 	TARGET						endpoint;
 
-	union {
+    union {
 		struct {
 			// status fields
-			uint8_t						nullmove			:1; ///< bool: no axes move, maybe we wait for temperatures or change speed
-			uint8_t						live					:1; ///< bool: this DDA is running and still has steps to do
+            uint8_t						nullmove			:1; ///< bool: no axes move, maybe we wait for temperatures or change speed
+            uint8_t						live					:1; ///< bool: this DDA is running and still has steps to do
 			#ifdef ACCELERATION_REPRAP
 			uint8_t						accel					:1; ///< bool: speed changes during this move, run accel code
 			#endif
@@ -114,12 +115,12 @@ typedef struct {
 			uint8_t						waitfor_temp	:1; ///< bool: wait for temperatures to reach their set values
 
 			// directions
-			uint8_t						x_direction		:1; ///< direction flag for X axis
+            uint8_t						x_direction		:1; ///< direction flag for X axis
 			uint8_t						y_direction		:1; ///< direction flag for Y axis
 			uint8_t						z_direction		:1; ///< direction flag for Z axis
 			uint8_t						e_direction		:1; ///< direction flag for E axis
 		};
-		uint8_t							allflags;	///< used for clearing all flags
+        uint8_t							allflags;	///< used for clearing all flags
 	};
 
 	// distances
@@ -130,8 +131,9 @@ typedef struct {
 
 	/// total number of steps: set to \f$\max(\Delta x, \Delta y, \Delta z, \Delta e)\f$
 	uint32_t					total_steps;
-
+#ifndef ACCELERATION_RAMPING
 	uint32_t					c; ///< time until next step, 24.8 fixed point
+#endif
 
 	#ifdef ACCELERATION_REPRAP
 	uint32_t					end_c; ///< time between 2nd last step and last step
@@ -139,17 +141,17 @@ typedef struct {
 	#endif
 	#ifdef ACCELERATION_RAMPING
 	/// number of steps accelerating
-	uint32_t					rampup_steps;
+    uint32_t					rampup_steps;
 	/// number of last step before decelerating
-	uint32_t					rampdown_steps;
+    uint32_t					rampdown_steps;
 	/// 24.8 fixed point timer value, maximum speed
 	uint32_t					c_min;
   #ifdef LOOKAHEAD
   // With the look-ahead functionality, it is possible to retain physical
   // movement between G1 moves. These variables keep track of the entry and
   // exit speeds between moves.
-  uint32_t          F_start;
-  uint32_t          F_end;
+  uint32_t          F_start_in_steps;
+  uint32_t          F_end_in_steps;
   // Displacement vector, in um, based between the difference of the starting
   // point and the target. Required to obtain the jerk between 2 moves.
   // Note: x_delta and co are in steps, not um.
@@ -158,6 +160,8 @@ typedef struct {
   // are the same. Note: we do not need a lot of granularity here: more than
   // MOVEBUFFER_SIZE is already enough.
   uint8_t           id;
+  uint32_t          c0;
+  int32_t           n0;
   #endif
 	#endif
 	#ifdef ACCELERATION_TEMPORAL
@@ -185,6 +189,7 @@ extern TARGET startpoint_steps;
 
 /// current_position holds the machine's current position. this is only updated when we step, or when G92 (set home) is received.
 extern TARGET current_position;
+
 
 /*
 	methods

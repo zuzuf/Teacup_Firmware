@@ -56,7 +56,7 @@ void dda_init(void) {
 
 	#ifdef ACCELERATION_RAMPING
 		move_state.n = 1;
-		move_state.c = ((uint32_t)((double)F_CPU / sqrt((double)(STEPS_PER_M_X * ACCELERATION / 1000.)))) << 8;
+		move_state.c = C0;
 	#endif
 }
 
@@ -86,10 +86,10 @@ void dda_new_startpoint(void) {
 void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	uint32_t	steps, x_delta_um, y_delta_um, z_delta_um, e_delta_um;
 	uint32_t	distance, c_limit, c_limit_calc;
-  #ifdef LOOKAHEAD
-  // Number the moves to identify them; allowed to overflow.
-  static uint8_t idcnt = 0;
-  #endif
+#ifdef LOOKAHEAD
+	// Number the moves to identify them; allowed to overflow.
+	static uint8_t idcnt = 0;
+#endif
 
 	// initialise DDA to a known state
 	dda->allflags = 0;
@@ -100,14 +100,16 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 	// we end at the passed target
 	memcpy(&(dda->endpoint), target, sizeof(TARGET));
 
-  #ifdef LOOKAHEAD
-  // Set the start and stop speeds to zero for now = full stops between
-  // moves. Also fallback if lookahead calculations fail to finish in time.
-  dda->F_start = 0;
-  dda->F_end = 0;
-  // Give this move an identifier.
-  dda->id = idcnt++;
-  #endif
+#ifdef LOOKAHEAD
+	// Set the start and stop speeds to zero for now = full stops between
+	// moves. Also fallback if lookahead calculations fail to finish in time.
+	dda->F_start_in_steps = 0;
+	dda->F_end_in_steps = 0;
+	dda->c0 = C0;
+	dda->n0 = 1;
+	// Give this move an identifier.
+	dda->id = idcnt++;
+#endif
 
 // TODO TODO: We should really make up a loop for all axes.
 //            Think of what happens when a sixth axis (multi colour extruder)
@@ -243,7 +245,7 @@ void dda_create(DDA *dda, TARGET *target, DDA *prev_dda) {
 		if (c_limit_calc > c_limit)
 			c_limit = c_limit_calc;
 		// check E axis
-		c_limit_calc = ((e_delta_um * 2400L) / dda->total_steps * (F_CPU / 40000) / MAXIMUM_FEEDRATE_E) << 8;
+        c_limit_calc = ((e_delta_um * 2400L) / dda->total_steps * (F_CPU / 40000) / MAXIMUM_FEEDRATE_E) << 8;
 		if (c_limit_calc > c_limit)
 			c_limit = c_limit_calc;
 
@@ -425,7 +427,16 @@ void dda_start(DDA *dda) {
 			move_state.e_counter = -(dda->total_steps >> 1);
 		memcpy(&move_state.x_steps, &dda->x_delta, sizeof(uint32_t) * 4);
 		#ifdef ACCELERATION_RAMPING
+		ATOMIC_START
 			move_state.step_no = 0;
+#ifdef LOOKAHEAD
+			if (! dda->waitfor_temp && !dda->endstop_check) {
+				// This is to avoid cumulative errors (which are high in case of small ramps)
+				move_state.c = dda->c0;
+				move_state.n = dda->n0;
+			}
+#endif
+		ATOMIC_END
 		#endif
 		#ifdef ACCELERATION_TEMPORAL
 		move_state.x_time = move_state.y_time = \
@@ -438,9 +449,9 @@ void dda_start(DDA *dda) {
 		// set timeout for first step
 		#ifdef ACCELERATION_RAMPING
 		if (dda->c_min > move_state.c) // can be true when look-ahead removed all deceleration steps
-			setTimer(dda->c_min >> 8);
+            setTimer(dda->c_min >> 8);
 		else
-			setTimer(move_state.c >> 8);
+            setTimer(move_state.c >> 8);
 		#else
 		setTimer(dda->c >> 8);
 		#endif
@@ -674,13 +685,15 @@ void dda_step(DDA *dda) {
       || (dda->endstop_check && move_state.n == -3)
     #endif
       ) {
-		dda->live = 0;
     #ifdef LOOKAHEAD
     // If look-ahead was using this move, it could have missed our activation:
     // make sure the ids do not match.
-    dda->id--;
+    ATOMIC_START
+        dda->id--;
+    ATOMIC_END
     #endif
-		#ifdef	DC_EXTRUDER
+        dda->live = 0;
+        #ifdef	DC_EXTRUDER
 			heater_set(DC_EXTRUDER, 0);
 		#endif
 		// z stepper is only enabled while moving
@@ -694,9 +707,9 @@ void dda_step(DDA *dda) {
 		// the nice thing about _not_ setting dda->c to dda->c_min is, the move stops at the exact same c as it started, so we have to calculate c only once for the time being
 		// TODO: set timer only if dda->c has changed
 		if (dda->c_min > move_state.c)
-			setTimer(dda->c_min >> 8);
+            setTimer(dda->c_min >> 8);
 		else
-			setTimer(move_state.c >> 8);
+            setTimer(move_state.c >> 8);
 	#else
 		setTimer(dda->c >> 8);
 	#endif

@@ -50,10 +50,15 @@ uint32_t dda_steps_to_velocity(uint32_t steps) {
   // Rewriting into steps and seperation in constant part and dynamic part:
   // F_steps = sqrt((2000*a)/STEPS_PER_M_X) * 60 * sqrt(steps)
   static uint32_t part = 0;
+//  if(part == 0)
+//    part = int_sqrt((uint32_t)((2000.0f*ACCELERATION*3600.0f*10000.0f)/(float)STEPS_PER_M_X));
+//  uint32_t res = int_sqrt((steps) * 10000) * part;
+//  return res / 10000;
   if(part == 0)
-    part = int_sqrt((uint32_t)((2000.0f*ACCELERATION*3600.0f*10000.0f)/(float)STEPS_PER_M_X));
-  uint32_t res = int_sqrt((steps) * 10000) * part;
-  return res / 10000;
+      part = (uint32_t)sqrtf((2000.0f*3600.0f*ACCELERATION*16384.0f)/(float)STEPS_PER_M_X);
+//    part = int_sqrt((uint32_t)((2000.0f*3600.0f*ACCELERATION*16384.0f)/(float)STEPS_PER_M_X));
+  uint32_t res = int_sqrt((steps) << 14) * part;
+  return res >> 14;
 }
 
 /**
@@ -68,7 +73,8 @@ uint32_t dda_steps_to_velocity(uint32_t steps) {
  * @param F2 feed rate of second move
  */
 int dda_jerk_size_2d_real(int32_t x1, int32_t y1, uint32_t F1, int32_t x2, int32_t y2, uint32_t F2) {
-  const int maxlen = 10000;
+//  const int maxlen = 10000;
+    const int32_t maxlen = 16384;
   // Normalize vectors so their length will be fixed
   // Note: approx_distance is not precise enough and may result in violent direction changes
   //sersendf_P(PSTR("Input vectors: (%ld, %ld) and (%ld, %ld)\r\n"),x1,y1,x2,y2);
@@ -171,13 +177,14 @@ void dda_join_moves(DDA *prev, DDA *current) {
   // Calculating the look-ahead settings can take a while; before modifying
   // the previous move, we need to locally store any values and write them
   // when we are done (and the previous move is not already active).
-  uint32_t prev_F, prev_F_start, prev_F_end, prev_rampup, prev_rampdown, prev_total_steps;
+  uint32_t prev_F, prev_F_in_steps, prev_F_start_in_steps, prev_F_end_in_steps, prev_rampup, prev_rampdown, prev_total_steps, prev_c0;
   uint8_t prev_id;
   // Similarly, we only want to modify the current move if we have the results of the calculations;
   // until then, we do not want to touch the current move settings.
   // Note: we assume 'current' will not be dispatched while this function runs, so we do not to
   // back up the move settings: they will remain constant.
-  uint32_t this_F_start, this_rampup, this_rampdown;
+  uint32_t this_F, this_F_in_steps, this_F_start_in_steps, this_rampup, this_rampdown, this_total_steps;
+  uint8_t this_id;
   int32_t jerk, jerk_e;       // Expresses the forces if we would change directions at full speed
   static uint32_t la_cnt = 0;     // Counter: how many moves did we join?
   #ifdef LOOKAHEAD_DEBUG
@@ -188,6 +195,8 @@ void dda_join_moves(DDA *prev, DDA *current) {
   // Sanity: if the previous move or this one has no actual movement, bail now. (e.g. G1 F1500)
   if(prev->delta.X==0 && prev->delta.Y==0 && prev->delta.Z==0 && prev->delta.E==0) return;
   if(current->delta.X==0 && current->delta.Y==0 && current->delta.Z==0 && current->delta.E==0) return;
+  if(prev->delta.X==0 && prev->delta.Y==0) return;
+  if(current->delta.X==0 && current->delta.Y==0) return;
 
   serprintf(PSTR("Current Delta: %ld,%ld,%ld E:%ld Live:%d\r\n"), current->delta.X, current->delta.Y, current->delta.Z, current->delta.E, current->live);
   serprintf(PSTR("Prev    Delta: %ld,%ld,%ld E:%ld Live:%d\r\n"), prev->delta.X, prev->delta.Y, prev->delta.Z, prev->delta.E, prev->live);
@@ -196,7 +205,7 @@ void dda_join_moves(DDA *prev, DDA *current) {
   // Note: moves are only modified after the calculations are complete.
   // Only prepare for look-ahead if we have 2 available moves to
   // join and the Z axis is unused (for now, Z axis moves are NOT joined).
-  if(prev!=NULL && prev->live==0 && prev->delta.Z==current->delta.Z) {
+  if(prev!=NULL && prev->live==0 && current->live==0 && prev->delta.Z==current->delta.Z) {
     // Calculate the jerk if the previous move and this move would be joined
     // together at full speed.
     jerk = dda_jerk_size_2d(prev->delta.X, prev->delta.Y, prev->endpoint.F,
@@ -210,24 +219,29 @@ void dda_join_moves(DDA *prev, DDA *current) {
   }
 
   // Make sure we have 2 moves and the previous move is not already active
-  if(prev!=NULL && prev->live==0) {
+  if(prev!=NULL && prev->live==0 && current->live == 0) {
     // Perform an atomic copy to preserve volatile parameters during the calculations
     ATOMIC_START
       prev_id = prev->id;
+      prev_c0 = prev->c0;
       prev_F = prev->endpoint.F;
-      prev_F_start = prev->F_start;
-      prev_F_end = prev->F_end;
+      prev_F_start_in_steps = prev->F_start_in_steps;
+      prev_F_end_in_steps = prev->F_end_in_steps;
       prev_rampup = prev->rampup_steps;
       prev_rampdown = prev->rampdown_steps;
       prev_total_steps = prev->total_steps;
+      this_id = current->id;
+      this_F = current->endpoint.F;
+      this_total_steps = current->total_steps;
     ATOMIC_END
+    prev_F_in_steps = ACCELERATE_RAMP_LEN(prev_F);
+    this_F_in_steps = ACCELERATE_RAMP_LEN(this_F);
 
     // The initial crossing speed is the minimum between both target speeds
     // Note: this is a given: the start speed and end speed can NEVER be
     // higher than the target speed in a move!
     // Note 2: this provides an upper limit, if needed, the speed is lowered.
-    uint32_t crossF = prev_F;
-    if(crossF > current->endpoint.F) crossF = current->endpoint.F;
+    uint32_t crossF_in_steps = MIN(prev_F_in_steps, this_F_in_steps);
 
     //sersendf_P(PSTR("j:%lu - XF:%lu"), jerk, crossF);
 
@@ -235,221 +249,130 @@ void dda_join_moves(DDA *prev, DDA *current) {
     if(jerk > LOOKAHEAD_MAX_JERK_XY) {
       serprintf(PSTR("Jerk too big: scale cross speed between moves\r\n"));
       // Get the highest speed between both moves
-      if(crossF < prev_F)
-        crossF = prev_F;
+      uint32_t crossF = MAX(prev_F, this_F);
 
       // Perform an exponential scaling
       uint32_t ujerk = (uint32_t)jerk;  // Use unsigned to double the range before overflowing
       crossF = (crossF*LOOKAHEAD_MAX_JERK_XY*LOOKAHEAD_MAX_JERK_XY)/(ujerk*ujerk);
 
+      crossF_in_steps = ACCELERATE_RAMP_LEN(crossF);
+      // Safety: make sure we never exceed the maximum speed of a move
+      crossF_in_steps = MIN(crossF_in_steps, prev_F_in_steps);
+      crossF_in_steps = MIN(crossF_in_steps, this_F_in_steps);
+
       // Optimize: if the crossing speed is zero, there is no join possible between these
       // two (fast) moves. Stop calculating and leave the full stop that is currently between
       // them.
-      if(crossF == 0)
+      if(crossF_in_steps == 0)
         return;
 
-      // Safety: make sure we never exceed the maximum speed of a move
-      if(crossF > current->endpoint.F) crossF = current->endpoint.F;
-      if(crossF > prev_F) crossF = prev_F;
-      sersendf_P(PSTR("=>F:%lu"), crossF);
+      sersendf_P(PSTR("=>F:%lu"), crossF_in_steps);
     }
     // Same to the extruder jerk: make sure we do not yank it
     if(jerk_e > LOOKAHEAD_MAX_JERK_E) {
       sersendf_P(PSTR("Jerk_e too big: scale cross speed between moves\r\n"));
-      uint32_t crossF2 = MAX(current->endpoint.F, prev_F);
+      uint32_t crossF = MAX(this_F, prev_F);
 
       // Perform an exponential scaling
       uint32_t ujerk = (uint32_t)jerk_e;  // Use unsigned to double the range before overflowing
-      crossF2 = (crossF2*LOOKAHEAD_MAX_JERK_E*LOOKAHEAD_MAX_JERK_E)/(ujerk*ujerk);
+      crossF = (crossF*LOOKAHEAD_MAX_JERK_E*LOOKAHEAD_MAX_JERK_E)/(ujerk*ujerk);
+
+      uint32_t crossF2_in_steps = ACCELERATE_RAMP_LEN(crossF);
+      // Safety: make sure we never exceed the maximum speed of a move
+      crossF2_in_steps = MIN(crossF2_in_steps, prev_F_in_steps);
+      crossF2_in_steps = MIN(crossF2_in_steps, this_F_in_steps);
 
       // Only continue with joining if there is a feasible crossing speed
-      if(crossF2 == 0) return;
+      if(crossF2_in_steps == 0) return;
 
-      // Safety: make sure the proposed speed is not higher than the target speeds of each move
-      crossF2 = MIN(crossF2, current->endpoint.F);
-      crossF2 = MIN(crossF2, prev_F);
-
-      if(crossF2 > crossF) {
-        sersendf_P(PSTR("Jerk_e: %lu => crossF: %lu (original: %lu)\r\n"), jerk_e, crossF2, crossF);
+      if(crossF2_in_steps > crossF_in_steps) {
+        sersendf_P(PSTR("Jerk_e: %lu => crossF: %lu (original: %lu)\r\n"), jerk_e, crossF2_in_steps, crossF_in_steps);
       }
 
       // Pick the crossing speed for these 2 move to be within the jerk limits
-      crossF = MIN(crossF, crossF2);
+      crossF_in_steps = MIN(crossF_in_steps, crossF2_in_steps);
+    }
+
+    // Compute the maximum speed we can reach for crossing
+    crossF_in_steps = MIN(crossF_in_steps, this_total_steps);
+    crossF_in_steps = MIN(crossF_in_steps, prev_total_steps + prev_F_start_in_steps);
+
+    if (crossF_in_steps == 0)
+        return;
+
+    // Build ramps for previous move
+    if (crossF_in_steps == prev_F_in_steps) {
+        prev_rampup = prev_F_in_steps - prev_F_start_in_steps;
+        prev_rampdown = 0;
+    }
+    else if (crossF_in_steps < prev_F_start_in_steps) {
+        prev_rampup = 0;
+        prev_rampdown = prev_F_start_in_steps - crossF_in_steps;
+        uint32_t extra = (prev_total_steps - prev_rampdown) >> 1;
+        uint32_t limit = prev_F_in_steps - prev_F_start_in_steps;
+        extra = MIN(extra, limit);
+
+        prev_rampup += extra;
+        prev_rampdown += extra;
+    }
+    else {
+        prev_rampup = crossF_in_steps - prev_F_start_in_steps;
+        prev_rampdown = 0;
+        uint32_t extra = (prev_total_steps - prev_rampup) >> 1;
+        uint32_t limit = prev_F_in_steps - crossF_in_steps;
+        extra = MIN(extra, limit);
+
+        prev_rampup += extra;
+        prev_rampdown += extra;
+    }
+    prev_rampdown = prev_total_steps - prev_rampdown;
+    prev_F_end_in_steps = crossF_in_steps;
+
+    // Build ramps for current move
+    if (crossF_in_steps == this_F_in_steps) {
+        this_rampup = 0;
+        this_rampdown = crossF_in_steps;
+    }
+    else {
+        this_rampup = 0;
+        this_rampdown = crossF_in_steps;
+
+        uint32_t extra = (this_total_steps - this_rampdown) >> 1;
+        uint32_t limit = this_F_in_steps - crossF_in_steps;
+        extra = MIN(extra, limit);
+
+        this_rampup += extra;
+        this_rampdown += extra;
+    }
+    this_rampdown = this_total_steps - this_rampdown;
+    this_F_start_in_steps = crossF_in_steps;
+
+    // Recompute ramping algorithm state values (to prevent accumulation of errors)
+    uint32_t c0 = C0;
+    uint32_t n0 = 1;
+    uint32_t step_no = 0;
+    if (prev_F_start_in_steps < this_F_start_in_steps) {
+        step_no = prev_F_start_in_steps;
+        n0 = 1 + (step_no << 2);
+        c0 = prev_c0;
+        }
+    for(; step_no < this_F_start_in_steps ; ++step_no) {
+        n0 += 4;
+        // be careful of signedness!
+        c0 = (int32_t)c0 - ((int32_t)(c0 * 2) / (int32_t)n0);
     }
 
     // Show the proposed crossing speed - this might get adjusted below
-    serprintf(PSTR("Initial crossing speed: %lu\r\n"), crossF);
+    serprintf(PSTR("Initial crossing speed: %lu\r\n"), crossF_in_steps);
 
-    // Forward check: test if we can actually reach the target speed in the previous move
-    // If not: we need to determine the obtainable speed and adjust crossF accordingly.
-    // Note: these ramps can be longer than the move: if so we can not reach top speed.
-    uint32_t up = ACCELERATE_RAMP_LEN(prev_F) - ACCELERATE_RAMP_LEN(prev_F_start);
-    uint32_t down = ACCELERATE_RAMP_LEN(prev_F) - ACCELERATE_RAMP_LEN(crossF);
-    // Test if both the ramp up and ramp down fit within the move
-    if(up+down > prev_total_steps) {
-      // Test if we can reach the crossF rate: if the difference between both ramps is larger
-      // than the move itself, there is no ramp up or down from F_start to crossF...
-      uint32_t diff = (up>down) ? up-down : down-up;
-      if(diff > prev_total_steps) {
-        // Cannot reach crossF from F_start, lower crossF and adjust both ramp-up and down
-        down = 0;
-        // Before we can determine how fast we can go in this move, we need the number of
-        // steps needed to reach the entry speed.
-        uint32_t prestep = ACCELERATE_RAMP_LEN(prev_F_start);
-        // Calculate what feed rate we can reach during this move
-        crossF = dda_steps_to_velocity(prestep+prev_total_steps);
-        // Make sure we do not exceed the target speeds
-        if(crossF > prev_F) crossF = prev_F;
-        if(crossF > current->endpoint.F) crossF = current->endpoint.F;
-        // The problem with the 'dda_steps_to_velocity' is that it will produce a
-        // rounded result. Use it to obtain an exact amount of steps needed to reach
-        // that speed and set that as the ramp up; we might stop accelerating for a
-        // couple of steps but that is better than introducing errors in the moves.
-        up = ACCELERATE_RAMP_LEN(crossF) - prestep;
-
-        #ifdef LOOKAHEAD_DEBUG
-        // Sanity check: the ramp up should never exceed the move length
-        if(up > prev_total_steps) {
-          sersendf_P(PSTR("FATAL ERROR during prev ramp scale, ramp is too long: up:%lu ; len:%lu ; target speed: %lu\r\n"),
-            up, prev_total_steps, crossF);
-          sersendf_P(PSTR("F_start:%lu ; F:%lu ; crossF:%lu\r\n"),
-            prev_F_start, prev_F, crossF);
-          dda_emergency_shutdown(PSTR("LA prev ramp scale, ramp is too long"));
-        }
-        #endif
-        // Show the result on the speed on the clipping of the ramp
-        serprintf(PSTR("Prev speed & crossing speed truncated to: %lu\r\n"), crossF);
-      } else {
-        // Can reach crossF; determine the apex between ramp up and ramp down
-        // In other words: calculate how long we can accelerate before decelerating to exit at crossF
-        // Note: while the number of steps is exponentially proportional to the velocity,
-        // the acceleration is linear: we can simply remove the same number of steps of both ramps.
-        uint32_t diff = (up + down - prev_total_steps) / 2;
-        up -= diff;
-        down -= diff;
-      }
-
-      #ifdef LOOKAHEAD_DEBUG
-      // Sanity check: make sure the speed limits are maintained
-      if(prev_F_start > prev_F || crossF > prev_F) {
-        serprintf(PSTR("Prev target speed exceeded!: prev_F_start:%lu ; prev_F:%lu ; prev_F_end:%lu\r\n"), prev_F_start, prev_F, crossF);
-        dda_emergency_shutdown(PSTR("Prev target speed exceeded"));
-      }
-      #endif
-    }
-    // Save the results
-    prev_rampup = up;
-    prev_rampdown = prev_total_steps - down;
-    prev_F_end = crossF;
-
-    #ifdef LOOKAHEAD_DEBUG
-    // Sanity check: make sure the speed limits are maintained
-    if(crossF > current->endpoint.F) {
-      serprintf(PSTR("This target speed exceeded!: F_start:%lu ; F:%lu ; prev_F_end:%lu\r\n"), crossF, current->endpoint.F);
-      dda_emergency_shutdown(PSTR("This target speed exceeded"));
-    }
-    #endif
-
-    // Forward check 2: test if we can actually reach the target speed in this move.
-    // If not: determine obtainable speed and adjust crossF accordingly. If that
-    // happens, a third (reverse) pass is needed to lower the speeds in the previous move...
-    //ramp_scaler = ACCELERATE_SCALER(current->lead); // Use scaler for current leading axis
-    up = ACCELERATE_RAMP_LEN(current->endpoint.F) - ACCELERATE_RAMP_LEN(crossF);
-    down = ACCELERATE_RAMP_LEN(current->endpoint.F);
-    // Test if both the ramp up and ramp down fit within the move
-    if(up+down > current->total_steps) {
-      // Test if we can reach the crossF rate
-      // Note: this is the inverse of the previous move: we need to exit at 0 speed as
-      // this is the last move in the queue. Implies that down >= up
-      if(down-up > current->total_steps) {
-        serprintf(PSTR("This move can not reach crossF - lower it\r\n"));
-        // Cannot reach crossF, lower it and adjust ramps
-        // Note: after this, the previous move needs to be modified to match crossF.
-        up = 0;
-        // Calculate what crossing rate we can reach: total/down * F
-        crossF = dda_steps_to_velocity(current->total_steps);
-        // Speed limit: never exceed the target rate
-        if(crossF > current->endpoint.F) crossF = current->endpoint.F;
-        // crossF will be conservative: calculate the actual ramp down length
-        down = ACCELERATE_RAMP_LEN(crossF);
-
-        #ifdef LOOKAHEAD_DEBUG
-        // Make sure we can break to a full stop before the move ends
-        if(down > current->total_steps) {
-          sersendf_P(PSTR("FATAL ERROR during ramp scale, ramp is too long: down:%lu ; len:%lu ; target speed: %lu\r\n"),
-            down, current->total_steps, crossF);
-          dda_emergency_shutdown(PSTR("LA current ramp scale, ramp is too long"));
-        }
-        #endif
-      } else {
-        serprintf(PSTR("This: crossF is usable but we will not reach Fmax\r\n"));
-        // Can reach crossF; determine the apex between ramp up and ramp down
-        // In other words: calculate how long we can accelerate before decelerating to start at crossF
-        // and end at F = 0
-        uint32_t diff = (down + up - current->total_steps) / 2;
-        up -= diff;
-        down -= diff;
-        serprintf(PSTR("Apex: %lu - new up: %lu - new down: %lu\r\n"), diff, up, down);
-
-        // sanity stuff: calculate the speeds for these ramps
-        serprintf(PSTR("Ramp up speed: %lu mm/s\r\n"), dda_steps_to_velocity(up+prev->rampup_steps));
-        serprintf(PSTR("Ramp down speed: %lu mm/s\r\n"), dda_steps_to_velocity(down));
-      }
-    }
-    // Save the results
-    this_rampup = up;
-    this_rampdown = current->total_steps - down;
-    this_F_start = crossF;
-    serprintf(PSTR("Actual crossing speed: %lu\r\n"), crossF);
-
-    // Potential reverse processing:
-    // Make sure the crossing speed is the same, if its not, we need to slow the previous move to
-    // the current crossing speed (note: the crossing speed could only be lowered).
-    // This can happen when this move is a short move and the previous move was a larger or faster move:
-    // since we need to be able to stop if this is the last move, we lowered the crossing speed
-    // between this move and the previous move...
-    if(prev_F_end != crossF) {
-      // Third reverse pass: slow the previous move to end at the target crossing speed.
-      //ramp_scaler = ACCELERATE_SCALER(current->lead); //todo: prev_lead // Use scaler for previous leading axis (again)
-      // Note: use signed values so we  can check if results go below zero
-      // Note 2: when up2 and/or down2 are below zero from the start, you found a bug in the logic above.
-      int32_t up2 = ACCELERATE_RAMP_LEN(prev_F) - ACCELERATE_RAMP_LEN(prev_F_start);
-      int32_t down2 = ACCELERATE_RAMP_LEN(prev_F) - ACCELERATE_RAMP_LEN(crossF);
-
-      // Test if both the ramp up and ramp down fit within the move
-      if(up2+down2 > prev_total_steps) {
-        int32_t diff = (up2 + down2 - (int32_t)prev_total_steps) / 2;
-        up2 -= diff;
-        down2 -= diff;
-
-        #ifdef LOOKAHEAD_DEBUG
-        if(up2 < 0 || down2 < 0) {
-          // Cannot reach crossF from prev_F_start - this should not happen!
-          sersendf_P(PSTR("FATAL ERROR during reverse pass ramp scale, ramps are too long: up:%ld ; down:%ld; len:%lu ; F_start: %lu ; crossF: %lu\r\n"),
-                    up2, down2, prev_total_steps, prev_F_start, crossF);
-          sersendf_P(PSTR("Original up: %ld - down %ld (diff=%ld)\r\n"),up2+diff,down2+diff,diff);
-          dda_emergency_shutdown(PSTR("reverse pass ramp scale, can not reach F_end from F_start"));
-        }
-        #endif
-      }
-      // Assign the results
-      prev_rampup = up2;
-      prev_rampdown = prev_total_steps - down2;
-      prev_F_end = crossF;
-    }
-
-    #ifdef LOOKAHEAD_DEBUG
-    if(crossF > current->endpoint.F || crossF > prev_F)
-      dda_emergency_shutdown(PSTR("Lookahead exceeded speed limits in crossing!"));
-
-    // When debugging, print the 2 moves we joined
-    // Legenda: Fs=F_start, len=# of steps, up/down=# steps in ramping, Fe=F_end
-    serprintf(PSTR("LA: (%lu) Fs=%lu, len=%lu, up=%lu, down=%lu, Fe=%lu <=> (%lu) Fs=%lu, len=%lu, up=%lu, down=%lu, Fe=0\r\n\r\n"),
-      moveno-1, prev->F_start, prev->total_steps, prev->rampup_steps,
-      prev->total_steps-prev->rampdown_steps, prev->F_end,
-      moveno, current->F_start, current->total_steps, current->rampup_steps,
-      current->total_steps - this_rampdown);
-    #endif
+    serprintf(PSTR("prev_F_start: %lu\r\n"), prev_F_start_in_steps);
+    serprintf(PSTR("prev_F: %lu\r\n"), prev_F_in_steps);
+    serprintf(PSTR("prev_rampup: %lu\r\n"), prev_rampup);
+    serprintf(PSTR("prev_rampdown: %lu\r\n"), prev_total_steps - prev_rampdown);
+    serprintf(PSTR("crossF: %lu\r\n"), crossF_in_steps);
+    serprintf(PSTR("this_rampup: %lu\r\n"), this_rampup);
+    serprintf(PSTR("this_rampdown: %lu\r\n"), this_total_steps - this_rampdown);
+    serprintf(PSTR("this_F: %lu\r\n"), this_F_in_steps);
 
     uint8_t timeout = 0;
 
@@ -460,14 +383,16 @@ void dda_join_moves(DDA *prev, DDA *current) {
       // Determine if we are fast enough - if not, just leave the moves
       // Note: to test if the previous move was already executed and replaced by a new
       // move, we compare the DDA id.
-      if(prev->live == 0 && prev->id == prev_id) {
-        prev->F_end = prev_F_end;
+      if(prev->live == 0 && prev->id == prev_id && current->live == 0 && current->id == this_id) {
+        prev->F_end_in_steps = prev_F_end_in_steps;
         prev->rampup_steps = prev_rampup;
         prev->rampdown_steps = prev_rampdown;
         current->rampup_steps = this_rampup;
         current->rampdown_steps = this_rampdown;
-        current->F_end = 0;
-        current->F_start = this_F_start;
+        current->F_end_in_steps = 0;
+        current->F_start_in_steps = this_F_start_in_steps;
+        current->c0 = c0;
+        current->n0 = n0;
         la_cnt++;
       } else
         timeout = 1;
